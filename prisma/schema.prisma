@@ -1,0 +1,258 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum TransactionTypeEnum {
+  CASH_IN
+  CASH_OUT
+  SEAT_PAYMENT
+  EXPENSE
+}
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+enum SeatStatus {
+  OPEN
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+// ─── Users (Auth) ────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  role         UserRole @default(VIEWER)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  approvedExpenses Expense[]   @relation("ApprovedBy")
+  auditLogs        AuditLog[]
+
+  @@map("users")
+}
+
+// ─── Members ─────────────────────────────────────────────
+
+model Member {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  phone     String?
+  email     String?      @unique
+  status    MemberStatus @default(ACTIVE)
+  joinedAt  DateTime     @default(now()) @map("joined_at")
+  notes     String?
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  deletedAt DateTime?    @map("deleted_at")
+
+  transactions      Transaction[]
+  seats              Seat[]
+  seatContributions  SeatContribution[]
+
+  @@index([status])
+  @@index([name])
+  @@map("members")
+}
+
+// ─── Transaction Types ───────────────────────────────────
+
+model TransactionType {
+  id          String              @id @default(uuid()) @db.Uuid
+  name        TransactionTypeEnum @unique
+  description String?
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  transactions Transaction[]
+
+  @@map("transaction_types")
+}
+
+// ─── Categories ──────────────────────────────────────────
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  transactions Transaction[]
+  expenses     Expense[]
+
+  @@map("categories")
+}
+
+// ─── Transactions ────────────────────────────────────────
+
+model Transaction {
+  id              String   @id @default(uuid()) @db.Uuid
+  memberId        String   @map("member_id") @db.Uuid
+  typeId          String   @map("type_id") @db.Uuid
+  categoryId      String?  @map("category_id") @db.Uuid
+  amount          Decimal  @db.Decimal(15, 2)
+  description     String?
+  transactionDate DateTime @map("transaction_date")
+  referenceNumber String?  @unique @map("reference_number")
+  runningBalance  Decimal  @default(0) @map("running_balance") @db.Decimal(15, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  member   Member          @relation(fields: [memberId], references: [id])
+  type     TransactionType @relation(fields: [typeId], references: [id])
+  category Category?       @relation(fields: [categoryId], references: [id])
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([memberId])
+  @@index([typeId])
+  @@index([transactionDate])
+  @@index([referenceNumber])
+  @@map("transactions")
+}
+
+// ─── Seats ───────────────────────────────────────────────
+
+model Seat {
+  id          String     @id @default(uuid()) @db.Uuid
+  seatNumber  Int        @unique @map("seat_number")
+  memberId    String?    @map("member_id") @db.Uuid
+  totalAmount Decimal    @map("total_amount") @db.Decimal(15, 2)
+  paidAmount  Decimal    @default(0) @map("paid_amount") @db.Decimal(15, 2)
+  status      SeatStatus @default(OPEN)
+  startDate   DateTime?  @map("start_date")
+  endDate     DateTime?  @map("end_date")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  deletedAt   DateTime?  @map("deleted_at")
+
+  member        Member?            @relation(fields: [memberId], references: [id])
+  contributions SeatContribution[]
+
+  @@index([memberId])
+  @@index([status])
+  @@map("seats")
+}
+
+// ─── Seat Contributions ──────────────────────────────────
+
+model SeatContribution {
+  id               String   @id @default(uuid()) @db.Uuid
+  seatId           String   @map("seat_id") @db.Uuid
+  memberId         String   @map("member_id") @db.Uuid
+  amount           Decimal  @db.Decimal(15, 2)
+  contributionDate DateTime @map("contribution_date")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
+
+  seat   Seat   @relation(fields: [seatId], references: [id])
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([seatId])
+  @@index([memberId])
+  @@index([contributionDate])
+  @@map("seat_contributions")
+}
+
+// ─── Expenses ────────────────────────────────────────────
+
+model Expense {
+  id           String   @id @default(uuid()) @db.Uuid
+  description  String
+  amount       Decimal  @db.Decimal(15, 2)
+  categoryId   String?  @map("category_id") @db.Uuid
+  expenseDate  DateTime @map("expense_date")
+  approvedById String?  @map("approved_by_id") @db.Uuid
+  receiptUrl   String?  @map("receipt_url")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  category   Category? @relation(fields: [categoryId], references: [id])
+  approvedBy User?     @relation("ApprovedBy", fields: [approvedById], references: [id])
+
+  ledgerEntries LedgerEntry[]
+
+  @@index([expenseDate])
+  @@index([categoryId])
+  @@map("expenses")
+}
+
+// ─── Ledger Entries (Financial Truth Layer) ──────────────
+
+model LedgerEntry {
+  id             String    @id @default(uuid()) @db.Uuid
+  transactionId  String?   @map("transaction_id") @db.Uuid
+  expenseId      String?   @map("expense_id") @db.Uuid
+  entryType      EntryType @map("entry_type")
+  account        String
+  amount         Decimal   @db.Decimal(15, 2)
+  runningBalance Decimal   @default(0) @map("running_balance") @db.Decimal(15, 2)
+  description    String?
+  entryDate      DateTime  @map("entry_date")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  transaction Transaction? @relation(fields: [transactionId], references: [id])
+  expense     Expense?     @relation(fields: [expenseId], references: [id])
+
+  @@index([transactionId])
+  @@index([expenseId])
+  @@index([account])
+  @@index([entryDate])
+  @@map("ledger_entries")
+}
+
+// ─── Audit Logs (Immutable) ──────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  oldValue   String?  @map("old_value") @db.Text
+  newValue   String?  @map("new_value") @db.Text
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
